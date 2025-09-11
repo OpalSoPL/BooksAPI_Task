@@ -7,7 +7,7 @@ AmazonDynamoDBClient client = new AmazonDynamoDBClient(dbConfig);
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-app.MapPost("/books", async (BookData bookData) => postBooks(bookData));
+app.MapPost("/books", async (BookData bookData) => await postBooks(bookData));
 app.MapGet("/books", async () => await getAllBooks());
 app.MapGet("/books/{id}", async (int id) => await getBookByID(id));
 app.MapDelete("/books/{id}", async (int id) => await deleteBook(id));
@@ -16,10 +16,20 @@ app.Run();
 
 //api request handlers
 
-//todo use DynamoDB
-
-IResult postBooks(BookData data)
+async Task<IResult> postBooks(BookData data)
 {
+    PutItemRequest request = new PutItemRequest
+    {
+        TableName = "Books",
+        Item = new()
+        {
+            {"Id", new AttributeValue(data.id)},
+            {"Author", new AttributeValue(data.author)},
+            {"Title", new AttributeValue(data.title)}
+        }
+    };
+
+    PutItemResponse t = await client.PutItemAsync(request);
     return Results.Accepted();
 }
 
@@ -53,7 +63,8 @@ async Task<IResult> getBookByID(int id)
     var getRequest = new GetItemRequest
     {
         TableName = "Books",
-        Key = new(){
+        Key = new()
+        {
             { "Id", new() { S = id.ToString() }}
         }
     };
@@ -76,8 +87,14 @@ async Task<IResult> getBookByID(int id)
 
 async Task<IResult> deleteBook(int id)
 {
+    var request = new DeleteItemRequest
+    {
+        TableName = "Books",
+        Key = new() { { "Id", new AttributeValue(id.ToString()) }}
+    };
 
-    return Results.Accepted($"/");
+    await client.DeleteItemAsync(request);
+    return Results.Accepted();
 }
 
 record BookData(string id, string author, string title);
