@@ -1,15 +1,16 @@
-Dictionary<int, Dictionary<string, string>> tempDb = new ()
-{
-    {0, new Dictionary<string, string> {{"title", "losowy tytuł"}, {"author", "losowy autor"}}}
-};
+using Amazon.DynamoDBv2;
+using Amazon.DynamoDBv2.Model;
+
+AmazonDynamoDBConfig dbConfig = new AmazonDynamoDBConfig {ServiceURL = "http://localhost:8000"};
+AmazonDynamoDBClient client = new AmazonDynamoDBClient(dbConfig);
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-app.MapPost("/books", async () => postBooks());
-app.MapGet("/books/{id}", async (int id) => getBookByID(id));
-app.MapGet("/books", async () => getAllBooks());
-app.MapDelete("/books/{id}", async (int id) => deleteBook(id));
+app.MapPost("/books", async (BookData bookData) => postBooks(bookData));
+app.MapGet("/books", async () => await getAllBooks());
+app.MapGet("/books/{id}", async (int id) => await getBookByID(id));
+app.MapDelete("/books/{id}", async (int id) => await deleteBook(id));
 
 app.Run();
 
@@ -17,23 +18,66 @@ app.Run();
 
 //todo use DynamoDB
 
-IResult postBooks()
+IResult postBooks(BookData data)
 {
     return Results.Accepted();
 }
 
-IResult getAllBooks()
+async Task<IResult> getAllBooks()
 {
-    return Results.Json(tempDb);
+    var request = new ScanRequest() { TableName = "Books" };
+
+    var response = await client.ScanAsync(request);
+
+    Dictionary<string, Dictionary<string, string>> data = new();
+
+    foreach (var item in response.Items)
+    {
+        Dictionary<string, string> itemData = new();
+        string id = item["Id"].S;
+
+        foreach (var kvp in item)
+        {
+            if (kvp.Key.Equals("id")) continue;
+
+            itemData.Add(kvp.Key, kvp.Value.S);
+        }
+        data.Add(id, itemData);
+    }
+
+    return Results.Json(data);
 }
 
-IResult getBookByID(int id)
+async Task<IResult> getBookByID(int id)
 {
-    return Results.Json(tempDb[id]);
+    var getRequest = new GetItemRequest
+    {
+        TableName = "Books",
+        Key = new(){
+            { "Id", new() { S = id.ToString() }}
+        }
+    };
+
+    var getItemResponse = await client.GetItemAsync(getRequest);
+    var item = getItemResponse.Item;
+
+    if (item == null || item.Count == 0)
+        return Results.NotFound();
+
+    Dictionary<string, string> data = new();
+
+    foreach (var kvp in item)
+    {
+        data.Add(kvp.Key, kvp.Value.S);
+    }
+
+    return Results.Json(data);
 }
 
-IResult deleteBook(int id)
+async Task<IResult> deleteBook(int id)
 {
-    tempDb.Remove(id);
-    return Results.Accepted();
+
+    return Results.Accepted($"/");
 }
+
+record BookData(string id, string author, string title);
