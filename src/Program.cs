@@ -1,16 +1,18 @@
+using System.Net;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.Model;
 
-AmazonDynamoDBConfig dbConfig = new AmazonDynamoDBConfig {ServiceURL = "http://localhost:8000"};
-AmazonDynamoDBClient client = new AmazonDynamoDBClient(dbConfig);
+AmazonDynamoDBClient client = new AmazonDynamoDBClient(
+        new AmazonDynamoDBConfig {ServiceURL = "http://localhost:8000"}
+    );
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
 app.MapPost("/books", async (BookData bookData) => await postBooks(bookData));
 app.MapGet("/books", async () => await getAllBooks());
-app.MapGet("/books/{id}", async (int id) => await getBookByID(id));
-app.MapDelete("/books/{id}", async (int id) => await deleteBook(id));
+app.MapGet("/books/{id}", async (string id) => await getBookByID(id));
+app.MapDelete("/books/{id}", async (string id) => await deleteBook(id));
 
 app.Run();
 
@@ -18,83 +20,115 @@ app.Run();
 
 async Task<IResult> postBooks(BookData data)
 {
-    PutItemRequest request = new PutItemRequest
+    var request = new PutItemRequest
     {
         TableName = "Books",
         Item = new()
         {
-            {"Id", new AttributeValue(data.id)},
-            {"Author", new AttributeValue(data.author)},
-            {"Title", new AttributeValue(data.title)}
+            {"Id", new() { S = data.Id }},
+            {"Author", new() { S = data.Author }},
+            {"Title", new () { S = data.Title }}
         }
     };
 
-    PutItemResponse t = await client.PutItemAsync(request);
-    return Results.Accepted();
+    try
+    {
+        await client.PutItemAsync(request);
+        return Results.Created();
+    }
+    catch (AmazonDynamoDBException e)
+    {
+        return Results.Problem(e.Message, statusCode: (int)e.StatusCode);
+    }
 }
 
 async Task<IResult> getAllBooks()
 {
     var request = new ScanRequest() { TableName = "Books" };
 
-    var response = await client.ScanAsync(request);
-
-    Dictionary<string, Dictionary<string, string>> data = new();
-
-    foreach (var item in response.Items)
+    try
     {
-        Dictionary<string, string> itemData = new();
-        string id = item["Id"].S;
+        var response = await client.ScanAsync(request);
 
-        foreach (var kvp in item)
+        Dictionary<string, Dictionary<string, string>> parsedResponse = new();
+
+        //parse data from AWS response
+        foreach (var item in response.Items)
         {
-            if (kvp.Key.Equals("id")) continue;
+            Dictionary<string, string> parsedItem = new();
 
-            itemData.Add(kvp.Key, kvp.Value.S);
+            foreach (var kvp in item)
+            {
+                if (kvp.Key.Equals("Id")) continue;
+
+                parsedItem.Add(kvp.Key, kvp.Value.S);
+            }
+
+            string id = item["Id"].S;
+            parsedResponse.Add(id, parsedItem);
         }
-        data.Add(id, itemData);
+
+        return Results.Json(parsedResponse);
+    }
+    catch (AmazonDynamoDBException e)
+    {
+        return Results.Problem(e.Message, statusCode: (int)e.StatusCode);
     }
 
-    return Results.Json(data);
 }
 
-async Task<IResult> getBookByID(int id)
+async Task<IResult> getBookByID(string id)
 {
+    if (!int.TryParse(id, out _))
+        return Results.BadRequest();
+
     var getRequest = new GetItemRequest
     {
         TableName = "Books",
-        Key = new()
-        {
-            { "Id", new() { S = id.ToString() }}
-        }
+        Key = new() {{ "Id", new() { S = id }}}
     };
 
-    var getItemResponse = await client.GetItemAsync(getRequest);
-    var item = getItemResponse.Item;
-
-    if (item == null || item.Count == 0)
-        return Results.NotFound();
-
-    Dictionary<string, string> data = new();
-
-    foreach (var kvp in item)
+    try
     {
-        data.Add(kvp.Key, kvp.Value.S);
-    }
+        var response = await client.GetItemAsync(getRequest);
+        var item = response.Item;
 
-    return Results.Json(data);
+        if (item == null || item.Count == 0)
+            return Results.NotFound();
+
+        Dictionary<string, string> data = new();
+
+        foreach (var kvp in item)
+            data.Add(kvp.Key, kvp.Value.S);
+
+        return Results.Json(data);
+    }
+    catch (AmazonDynamoDBException e)
+    {
+        return Results.Problem(e.Message, statusCode: (int)e.StatusCode);
+    }
 }
 
-async Task<IResult> deleteBook(int id)
+async Task<IResult> deleteBook(string id)
 {
+    if (!int.TryParse(id, out _))
+        return Results.BadRequest();
+
     var request = new DeleteItemRequest
     {
         TableName = "Books",
-        Key = new() { { "Id", new AttributeValue(id.ToString()) }}
+        Key = new() {{ "Id", new () { S = id }}}
     };
 
-    await client.DeleteItemAsync(request);
-    return Results.Accepted();
+    try
+    {
+        await client.DeleteItemAsync(request);
+        return Results.NoContent();
+    }
+    catch (AmazonDynamoDBException e)
+    {
+        return Results.Problem(e.Message, statusCode: (int)e.StatusCode);
+    }
 }
 
-record BookData(string id, string author, string title);
+record BookData(string Id, string Author, string Title);
