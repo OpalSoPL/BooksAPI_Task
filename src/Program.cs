@@ -30,7 +30,9 @@ async Task<IResult> postBooks(BookData data)
     try
     {
         //check if request contains every param
-        if (data.Id == null || data.Title == null || data.Author == null)
+        if (string.IsNullOrWhiteSpace(data.Id) ||
+            string.IsNullOrWhiteSpace(data.Title) ||
+            string.IsNullOrWhiteSpace(data.Author))
             return Results.BadRequest();
 
         await BooksTable.PutItemAsync(data.ToDocument());
