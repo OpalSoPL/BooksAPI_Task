@@ -6,8 +6,10 @@ AmazonDynamoDBClient client = new AmazonDynamoDBClient(
         new AmazonDynamoDBConfig {ServiceURL = "http://localhost:8000"}
     );
 
-TableBuilder BookTableBuilder = new(client, "Books");
-    BookTableBuilder.AddHashKey("Id", DynamoDBEntryType.String);
+TableBuilder BooksTableBuilder = new(client, "Books");
+    BooksTableBuilder.AddHashKey("Id", DynamoDBEntryType.String);
+
+Table BooksTable = BooksTableBuilder.Build();
 
 //ASP.NET setup
 
@@ -25,11 +27,9 @@ app.Run();
 
 async Task<IResult> postBooks(Document data)
 {
-    Table table = BookTableBuilder.Build();
-
     try
     {
-        await table.PutItemAsync(data);
+        await BooksTable.PutItemAsync(data);
         return Results.Created();
     }
     catch (AmazonDynamoDBException e)
@@ -40,11 +40,9 @@ async Task<IResult> postBooks(Document data)
 
 async Task<IResult> getAllBooks()
 {
-    Table table = BookTableBuilder.Build();
-
     try
     {
-        var search = table.Scan(new ScanFilter());
+        var search = BooksTable.Scan(new ScanFilter());
         List<BookData> list = [];
 
         //parse data from AWS response
@@ -60,16 +58,13 @@ async Task<IResult> getAllBooks()
     {
         return Results.Problem(e.Message, statusCode: (int)e.StatusCode);
     }
-
 }
 
 async Task<IResult> getBookByID(string id)
 {
-    Table table = BookTableBuilder.Build();
-
     try
     {
-        Document res = await table.GetItemAsync(id);
+        Document res = await BooksTable.GetItemAsync(id);
 
         if (res == null)
             return Results.NotFound();
@@ -84,10 +79,9 @@ async Task<IResult> getBookByID(string id)
 
 async Task<IResult> deleteBook(string id)
 {
-    Table table = BookTableBuilder.Build();
     try
     {
-        await table.DeleteItemAsync(id);
+        await BooksTable.DeleteItemAsync(id);
         return Results.NoContent();
     }
     catch (AmazonDynamoDBException e)
