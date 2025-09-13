@@ -1,15 +1,20 @@
-using System.Net;
 using Amazon.DynamoDBv2;
-using Amazon.DynamoDBv2.Model;
+using Amazon.DynamoDBv2.DocumentModel;
 
+//DynamoDB setup
 AmazonDynamoDBClient client = new AmazonDynamoDBClient(
         new AmazonDynamoDBConfig {ServiceURL = "http://localhost:8000"}
     );
 
+TableBuilder BookTableBuilder = new(client, "Books");
+    BookTableBuilder.AddHashKey("Id", DynamoDBEntryType.String);
+
+//ASP.NET setup
+
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-app.MapPost("/books", async (BookData bookData) => await postBooks(bookData));
+app.MapPost("/books", async (BookData bookData) => await postBooks(bookData.ToDocument()));
 app.MapGet("/books", async () => await getAllBooks());
 app.MapGet("/books/{id}", async (string id) => await getBookByID(id));
 app.MapDelete("/books/{id}", async (string id) => await deleteBook(id));
@@ -18,22 +23,13 @@ app.Run();
 
 //api request handlers
 
-async Task<IResult> postBooks(BookData data)
+async Task<IResult> postBooks(Document data)
 {
-    var request = new PutItemRequest
-    {
-        TableName = "Books",
-        Item = new()
-        {
-            {"Id", new() { S = data.Id }},
-            {"Author", new() { S = data.Author }},
-            {"Title", new () { S = data.Title }}
-        }
-    };
+    Table table = BookTableBuilder.Build();
 
     try
     {
-        await client.PutItemAsync(request);
+        await table.PutItemAsync(data);
         return Results.Created();
     }
     catch (AmazonDynamoDBException e)
@@ -44,31 +40,21 @@ async Task<IResult> postBooks(BookData data)
 
 async Task<IResult> getAllBooks()
 {
-    var request = new ScanRequest() { TableName = "Books" };
+    Table table = BookTableBuilder.Build();
 
     try
     {
-        var response = await client.ScanAsync(request);
-
-        Dictionary<string, Dictionary<string, string>> parsedResponse = new();
+        var search = table.Scan(new ScanFilter());
+        List<BookData> list = [];
 
         //parse data from AWS response
-        foreach (var item in response.Items)
+        while (!search.IsDone)
         {
-            Dictionary<string, string> parsedItem = new();
+            var set = await search.GetNextSetAsync();
 
-            foreach (var kvp in item)
-            {
-                if (kvp.Key.Equals("Id")) continue;
-
-                parsedItem.Add(kvp.Key, kvp.Value.S);
-            }
-
-            string id = item["Id"].S;
-            parsedResponse.Add(id, parsedItem);
+            list.AddRange(set.Select(data => BookData.Convert(data)));
         }
-
-        return Results.Json(parsedResponse);
+        return Results.Json(list);
     }
     catch (AmazonDynamoDBException e)
     {
@@ -79,29 +65,16 @@ async Task<IResult> getAllBooks()
 
 async Task<IResult> getBookByID(string id)
 {
-    if (!int.TryParse(id, out _))
-        return Results.BadRequest();
-
-    var getRequest = new GetItemRequest
-    {
-        TableName = "Books",
-        Key = new() {{ "Id", new() { S = id }}}
-    };
+    Table table = BookTableBuilder.Build();
 
     try
     {
-        var response = await client.GetItemAsync(getRequest);
-        var item = response.Item;
+        Document res = await table.GetItemAsync(id);
 
-        if (item == null || item.Count == 0)
+        if (res == null)
             return Results.NotFound();
 
-        Dictionary<string, string> data = new();
-
-        foreach (var kvp in item)
-            data.Add(kvp.Key, kvp.Value.S);
-
-        return Results.Json(data);
+        return Results.Json(BookData.Convert(res));
     }
     catch (AmazonDynamoDBException e)
     {
@@ -111,18 +84,10 @@ async Task<IResult> getBookByID(string id)
 
 async Task<IResult> deleteBook(string id)
 {
-    if (!int.TryParse(id, out _))
-        return Results.BadRequest();
-
-    var request = new DeleteItemRequest
-    {
-        TableName = "Books",
-        Key = new() {{ "Id", new () { S = id }}}
-    };
-
+    Table table = BookTableBuilder.Build();
     try
     {
-        await client.DeleteItemAsync(request);
+        await table.DeleteItemAsync(id);
         return Results.NoContent();
     }
     catch (AmazonDynamoDBException e)
@@ -131,4 +96,20 @@ async Task<IResult> deleteBook(string id)
     }
 }
 
-record BookData(string Id, string Author, string Title);
+record BookData(string Id, string Author, string Title)
+{
+    public static BookData Convert(Document doc)
+    {
+        return new BookData(doc["Id"], doc["Author"], doc["Title"]);
+    }
+
+    public Document ToDocument()
+    {
+        return new()
+        {
+            ["Id"] = Id,
+            ["Author"] = Author,
+            ["Title"] = Title
+        };
+    }
+}
