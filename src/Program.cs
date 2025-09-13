@@ -16,7 +16,7 @@ Table BooksTable = BooksTableBuilder.Build();
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-app.MapPost("/books", async (BookData bookData) => await postBooks(bookData.ToDocument()));
+app.MapPost("/books", async (BookData bookData) => await postBooks(bookData));
 app.MapGet("/books", async () => await getAllBooks());
 app.MapGet("/books/{id}", async (string id) => await getBookByID(id));
 app.MapDelete("/books/{id}", async (string id) => await deleteBook(id));
@@ -25,12 +25,16 @@ app.Run();
 
 //api request handlers
 
-async Task<IResult> postBooks(Document data)
+async Task<IResult> postBooks(BookData data)
 {
     try
     {
-        await BooksTable.PutItemAsync(data);
-        return Results.Created($"/books/{data["Id"].AsString()}", BookData.Convert(data));
+        //check if request contains every param
+        if (data.Id == null || data.Title == null || data.Author == null)
+            return Results.BadRequest();
+
+        await BooksTable.PutItemAsync(data.ToDocument());
+        return Results.Created($"/books/{data.Id}", data);
     }
     catch (AmazonDynamoDBException e)
     {
