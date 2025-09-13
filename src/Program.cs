@@ -30,7 +30,7 @@ async Task<IResult> postBooks(Document data)
     try
     {
         await BooksTable.PutItemAsync(data);
-        return Results.Created();
+        return Results.Created($"/books/{data["Id"].AsString()}", BookData.Convert(data));
     }
     catch (AmazonDynamoDBException e)
     {
@@ -50,7 +50,7 @@ async Task<IResult> getAllBooks()
         {
             var set = await search.GetNextSetAsync();
 
-            list.AddRange(set.Select(data => BookData.Convert(data)));
+            list.AddRange(set.Select(BookData.Convert));
         }
         return Results.Json(list);
     }
